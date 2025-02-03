@@ -1,0 +1,375 @@
+# Common Type Definitions
+type VersionUpdate = {version: Int, sameIdVersions: List[Int]}
+type DomainVariant = {domainId: Int, variantId: Int}
+type DomainVariantUpdate = {created: DomainVariant, existing: List[DomainVariant]}
+type StateTransition = {from: String, to: String}
+
+# Common Evaluator Functions
+def isHttpError(status: Events[Int]): Events[Bool] = {
+    status >= 400 && status <= 599
+}
+
+def onChange[T](subject: Events[T]): Events[Unit] = {
+    unitIf(defined(pure(subject)))
+}
+
+# Conditions
+in auth: Events[Bool]
+in sync: Events[Bool]
+in connector: Events[Bool]
+in request: Events[Bool]
+in rqsPending: Events[Bool]
+in functionState: Events[String] # RQ 2
+in programState: Events[String] # RQ 2
+in versionedItemUpdate: Events[VersionUpdate] # RQ 4
+in dispatchedHttpStatus: Events[Int] # RQ 5
+in itemStateTransitions: Events[StateTransition] # RQ 7
+in domainVariantUpdate: Events[DomainVariantUpdate] # RQ 8
+in lastSync: Events[Int] # RQ 10
+in requestResponseLength: Events[Int] # RQ 12
+in receivedHttpStatus: Events[Int]
+
+def allConditionChanges = merge4(
+  onChange(auth), onChange(sync), onChange(connector), merge4(
+    onChange(request), onChange(rqsPending), onChange(rqDbRead), merge4(
+      onChange(rqDbWrite), onChange(functionState), onChange(programState), merge4(
+        onChange(versionedItemUpdate), onChange(dispatchedHttpStatus), onChange(itemStateTransitions), merge3(
+          onChange(domainVariantUpdate), onChange(lastSync), onChange(requestResponseLength)
+        )
+      )
+    )
+  )
+)
+
+# Inferable Triggers
+# Produce a clock stream for recurrent checks
+def periodicalCheck = period(5)
+
+# RQ 1
+def rqRetrievalTrigger = falling(rqsPending)
+
+# RQ 2
+def stateTransitionTrigger = merge(onChange(programState), 
+  onChange(functionState))
+# RQ 3
+def requestResponseFailTrigger = unitIf(isHttpError(receivedHttpStatus))
+# RQ 4
+def versionedItemUpdateTrigger = onChange(versionedItemUpdate)
+# RQ 6/10
+def syncTrigger = rising(default(sync, false))
+# RQ 7 
+def specExecUpdateTrigger = onChange(itemStateTransitions)
+# RQ 8
+def voUpdateTrigger = onChange(domainVariantUpdate)
+# RQ 11
+def mergedEvents = merge(allConditionChanges, allNonIdleTriggers)
+def anythingHappened = default(defined(mergedEvents), true)
+def isIdle = on(periodicalCheck, 
+  anythingHappened && runtime(anythingHappened, periodicalCheck) > 300 * 1000)
+def programIdleTrigger = rising(default(isIdle, false))
+# RQ 12
+def requestResponseEmptyTrigger = unitIf(requestResponseLength == 0)
+# RQ 15
+def isRequestIdle = on(
+  periodicalCheck, 
+  request && runtime(rising(default(request, false)), periodicalCheck) > 120 * 1000
+  )
+def requestIdleTrigger = rising(default(isRequestIdle, false))
+
+# Regular triggers
+in rqDbRead: Events[Unit] # RQ 1
+in rqDbWrite: Events[Unit] # RQ 1
+in exceptionTrigger: Events[Unit]
+in progTerminationTrigger: Events[Unit]
+in requestFailTrigger: Events[Unit]
+
+def allNonIdleTriggers = merge4(stateTransitionTrigger, requestResponseFailTrigger, versionedItemUpdateTrigger, merge4(syncTrigger, specExecUpdateTrigger, voUpdateTrigger, requestResponseEmptyTrigger))
+def allTriggers = merge3(programIdleTrigger, requestIdleTrigger, allNonIdleTriggers)
+
+# Qualifies a trigger by propagating it only when its pre-condition is fulfilled
+def qualifiedTrigger(
+    trigger: Events[Unit], 
+    preCondition: Events[Bool]
+): Events[Unit] = { 
+  unitIf(on(trigger, preCondition)) 
+}
+
+# Checks if a requirement is successfully fulfilled
+def isRequirementFulfilled(
+    trigger: Events[Unit], 
+    postCondition: Events[Bool],
+    waitingPeriod: Int # In Seconds
+): Events[Bool] = {
+  def actualPostCondition = default(postCondition, false)
+  # Assuming the global system clock measures milliseconds
+  def occurredInTime = 
+    time(rising(actualPostCondition)) <= time(trigger) + waitingPeriod * 1000
+  def postAfterTrigger = unitIf(
+    defined(rising(actualPostCondition)) && defined(trigger)
+  )
+  def postFulfilled = lift(
+    occurredInTime && actualPostCondition, 
+    defined(trigger) && actualPostCondition, 
+    (inTime, atAll) => if isSome(inTime) then inTime else atAll
+  )
+  
+  on(merge(trigger, postAfterTrigger), postFulfilled)
+}
+
+# Checks if a requirement (identified by its qualified trigger) is finally decided
+def isRequirementDecided(
+    qualifiedTrigger: Events[Unit],
+    waitingPeriod: Int # In Seconds
+): Events[Bool] = {
+  def hasSubsequentTrigger = 
+    resetCount(allTriggers, qualifiedTrigger) > 1
+    # Assuming the global system clock measures milliseconds
+  def isExpired = 
+    time(allTriggers) - time(qualifiedTrigger) > waitingPeriod * 1000
+  
+  hasSubsequentTrigger && isExpired
+}
+
+# Evaluates the correctness of a qualified trigger and a post-Condition
+# Results in a value of the four-valued truth domain
+def fourValueTruthEvaluation(
+  trigger: Events[Unit], 
+  post: Events[Bool],
+  waitingPeriod: Int # In Seconds
+): Events[Int] = {
+  def decided = default(isRequirementDecided(trigger, waitingPeriod), false)
+  def fulfilled = default(isRequirementFulfilled(trigger, post, waitingPeriod), true)
+  
+  default(lift4(
+    constIf(-2, decided && !fulfilled), 
+    constIf(-1, !decided && !fulfilled), 
+    constIf(1, !decided && fulfilled), 
+    constIf(2, decided && fulfilled),
+    (a, b, c, d) => 
+      if isSome(a) then a
+      else if isSome(b) then b
+      else if isSome(c) then c
+      else d  
+  ), 1)
+}
+
+# Amplifies any negative verdict into a definitely decided negative verdict
+# Can be used for logical "finally" expressions failing definitely on the first violation
+def amplifyNegativeVerdict(verdict: Events[Int]): Events[Int] = {
+  lift(
+    verdict, 
+    const(-2, verdict), 
+    (a, b) => if isSome(a) && getSome(a) > 0 then a else b
+  )
+}
+
+# Actual Requirement Specifications
+
+# RQ 1
+def requirement1() = {
+  def pre = sync && auth && connector
+  def trigger = qualifiedTrigger(rqRetrievalTrigger, pre)
+  def post = defined(rqDbRead) && defined(rqDbWrite) && !connector
+  
+  fourValueTruthEvaluation(trigger, post, 10)
+}
+
+# RQ 2
+def transition = (state: Events[String], defaultValue: String) => {
+  	from: default(prev(state), defaultValue),
+    to: default(state, defaultValue)
+}
+
+def rq2PostCondition() = {
+  def program = transition(programState, "None")
+  def function = transition(functionState, "None")
+  
+  def isValidProgramStateTransition = 
+    program.to == "Error" || program.to == "None" ||
+    program.from == "None" && program.to == "Validation" ||
+    program.from == "Validation" && program.to == "Authentication" ||
+    program.from == "Authentication" && program.to == "Requesting" ||
+    program.from == "Requesting" && program.to == "Version Resolving" ||
+    program.from == "Version Resolving" && program.to == "Requirements Parsing" ||
+    program.from == "Requirements Parsing" && program.to == "Database Storage" ||
+    program.from == "Database Storage" && program.to == "None"
+  
+  def isValidFunctionStateTransition =
+    function.to == "None" ||
+    function.from == "None" && function.to == "Synchronize" ||
+    function.from == "Synchronize" && function.to == "Handle" ||
+    function.from == "Handle" && function.to == "GetById" ||
+    function.from == "GetById" && function.to == "GetAndSynchronizeRequirements" ||
+    function.from == "GetAndSynchronizeRequirements" && function.to == "GetCredentialsByType" ||
+    function.from == "GetCredentialsByType" && function.to == "GetById" ||
+    function.from == "GetById" && function.to == "GetSession" ||
+    function.from == "GetSession" && function.to == "GetByFilter" ||
+    function.from == "GetByFilter" && function.to == "GetAll" ||
+    function.from == "GetAll" && function.to == "Get" ||
+    function.from == "Get" && function.to == "GetByIdAndVersion" ||
+    function.from == "GetByIdAndVersion" && function.to == "Load" ||
+    function.from == "Load" && function.to == "Create" ||
+    function.from == "Create" && function.to == "DeprecateByFilter" ||
+    function.from == "DeprecateByFilter" && function.to == "GetByContext" ||
+    function.from == "GetByContext" && function.to == "Create"
+  
+  isValidProgramStateTransition && isValidFunctionStateTransition && 
+  (defined(function.to == "Error") || defined(function.to == "Database Storage"))
+}
+
+def requirement2() = {
+  fourValueTruthEvaluation(stateTransitionTrigger, rq2PostCondition, 10)
+}
+
+# RQ 3
+def requirement3() = {
+  def pre = sync && request
+  def trigger = qualifiedTrigger(requestResponseFailTrigger, pre)
+  def post = !noEvent(requestFailTrigger, trigger)
+  
+  fourValueTruthEvaluation(trigger, post, 10)
+}
+
+# RQ 4
+def requirement4() = {
+  def haystack = versionedItemUpdate.sameIdVersions
+  def needle = versionedItemUpdate.version
+  def sameVersionIndex = List.find(haystack, needle)
+  def post = sameVersionIndex == -1 || List.find(List.set(haystack, sameVersionIndex, -1), needle) == -1
+
+  fourValueTruthEvaluation(versionedItemUpdateTrigger, post, 10)
+}
+
+# RQ 5
+def requirement5() = {
+  def pre = sync
+  def trigger = qualifiedTrigger(progTerminationTrigger, pre)
+  def post = defined(falling(sync)) && isHttpError(dispatchedHttpStatus)
+  
+  fourValueTruthEvaluation(trigger, post, 10)
+}
+
+# RQ 6
+def requirement6() = {
+  def pre = !default(sync, false)
+  def trigger = qualifiedTrigger(syncTrigger, pre)
+  def post = sync && connector
+  
+  fourValueTruthEvaluation(trigger, post, 300)
+}
+
+# RQ 7
+def rq7PostCondition() = {
+  def from = itemStateTransitions.from
+  def to = itemStateTransitions.to
+  def isValidTransition = (from == "Draft" && to == "Released") ||
+    (from == "Released" && to == "Draft") ||
+    (from == "Released" && to == "Approved") ||
+    (from == "Approved" && to == "Draft")
+  
+  default(isValidTransition, true)
+}
+
+def requirement7() = {
+  amplifyNegativeVerdict(fourValueTruthEvaluation(specExecUpdateTrigger, rq7PostCondition, 10))
+}
+
+# RQ 8
+def requirement8() = {
+  def post = List.find(domainVariantUpdate.existing, domainVariantUpdate.created) == -1
+  amplifyNegativeVerdict(fourValueTruthEvaluation(voUpdateTrigger, default(post, true), 10))
+}
+
+# RQ 9
+def requirement9() = {
+  def pre = sync
+  def trigger = qualifiedTrigger(exceptionTrigger, pre)
+  def post = defined(progTerminationTrigger)
+  
+  fourValueTruthEvaluation(trigger, post, 10)
+}
+
+# RQ 10
+def requirement10() = {
+  def trigger = merge(syncTrigger, onChange(lastSync))
+  # Assuming the global system clock measures seconds
+  def millisecondsPerDay = 24 * 60 * 60 * 1000
+  def millisecondsPerWeek = 7 * millisecondsPerDay
+  def post = !defined(lastSync) || lastSync >= time(lastSync) - millisecondsPerDay
+
+  amplifyNegativeVerdict(fourValueTruthEvaluation(trigger, default(post, true), 10))
+}
+
+# RQ 11
+def requirement11() = {
+  def pre = sync
+  def trigger = qualifiedTrigger(programIdleTrigger, pre)
+  def post = defined(progTerminationTrigger)
+  
+  amplifyNegativeVerdict(fourValueTruthEvaluation(trigger, post, 10))
+}
+
+# RQ 12
+def requirement12() = {
+  def pre = sync && request 
+  def trigger = qualifiedTrigger(requestResponseEmptyTrigger, pre)
+  def post = defined(requestFailTrigger)
+  
+  fourValueTruthEvaluation(trigger, post, 10)
+}
+
+# RQ 13
+def requirement13() = {
+  def pre = sync && rqsPending
+  def trigger = qualifiedTrigger(requestFailTrigger, pre)
+  def post = defined(progTerminationTrigger)
+  
+  fourValueTruthEvaluation(trigger, post, 10)
+}
+
+# RQ 14
+def requirement14() = {
+  def pre = sync && !rqsPending
+  def trigger = qualifiedTrigger(requestFailTrigger, pre)
+  def post = defined(progTerminationTrigger) || request
+  
+  fourValueTruthEvaluation(trigger, post, 10)
+}
+
+# RQ 15
+def requirement15() = {
+  def pre = sync && request
+  def trigger = qualifiedTrigger(requestIdleTrigger, pre)
+  def post = defined(requestFailTrigger)
+  
+  fourValueTruthEvaluation(trigger, post, 10)
+}
+
+# Construct Verdict
+out requirement1; out requirement2; out requirement3; out requirement4; out requirement5; out requirement6; out requirement7; out requirement8; out requirement9; out requirement10; out requirement11; out requirement12; out requirement13; out requirement14; out requirement15;
+
+# Checks five given verdicts, finds any negative one and anticipates a positive one else.
+# No final positive verdict is propagated due to globally applicable requirements.
+def formVerdict(verdicts: List[Int]): Option[Int] =
+  # Contains final negative verdict
+  if List.find(verdicts, -2) != -1 then Option.Some(-2)
+  # Contains presumably negative verdict
+  else if List.find(verdicts, -1) != -1 then Option.Some(-1)
+  # No negative verdict, yield presumably positive verdict
+  else Option.Some(1)
+
+def formVerdict5(a: Option[Int], b: Option[Int], c: Option[Int], d: Option[Int], e: Option[Int]): Option[Int] = {
+  def listed = List.append(List.append(List.append(List.append(List.append(List.empty[Int](), getSomeOrElse(a, 1)), getSomeOrElse(b, 1)), getSomeOrElse(c, 1)), getSomeOrElse(d, 1)), getSomeOrElse(e, 1))
+  formVerdict(listed)
+}
+
+def formVerdict3(a: Option[Int], b: Option[Int], c: Option[Int]): Option[Int] = {
+  def listed = List.append(List.append(List.append(List.empty[Int](), getSomeOrElse(a, 1)), getSomeOrElse(b, 1)), getSomeOrElse(c, 1))
+  formVerdict(listed)
+}
+
+def partialVerdict1 = lift5(requirement1, requirement2, requirement3, requirement4, requirement5, formVerdict5)
+def partialVerdict2 = lift5(requirement6, requirement7, requirement8, requirement9, requirement10, formVerdict5)
+def partialVerdict3 = lift5(requirement11, requirement12, requirement13, requirement14, requirement15, formVerdict5)
+
+out lift3(partialVerdict1, partialVerdict2, partialVerdict3, formVerdict3) as finalVerdict

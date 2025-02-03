@@ -1,0 +1,56 @@
+1: sync=true
+8: functionState="None"
+17: rqsPending=true
+27: programState="None"
+35: functionState="Synchronize"
+105: functionState="Handle"
+239: lastSync=1737621253425
+245: programState="Validation"
+252: functionState="GetById"
+367: programState="Authentication"
+375: functionState="GetAndSynchronizeRequirements"
+381: functionState="GetCredentialsByType"
+415: functionState="GetById"
+451: functionState="GetSession"
+458: programState="Requesting"
+470: request=true
+605: requestResponseLength=1151
+610: request=false
+630: functionState="GetByFilter"
+636: functionState="GetAll"
+645: request=true
+858: requestResponseLength=4300
+863: request=false
+888: functionState="Get"
+903: request=true
+925: request=true
+926: request=true
+1066: requestResponseLength=756
+1071: request=false
+1116: requestResponseLength=756
+1121: request=false
+1140: requestResponseLength=844
+1145: request=false
+1158: rqsPending=false
+1163: programState="Version Resolving"
+1167: functionState="GetByIdAndVersion"
+1172: rqDbRead
+1235: functionState="Load"
+1241: programState="Requirements Parsing"
+1325: programState="Database Storage"
+1330: functionState="Create"
+1334: rqDbWrite
+1526: rqDbRead
+1596: versionedItemUpdate={version=9, sameIdVersions=List(9)}
+1610: rqDbRead
+1655: versionedItemUpdate={version=3, sameIdVersions=List(3)}
+1661: rqDbRead
+1681: versionedItemUpdate={version=3, sameIdVersions=List(3)}
+1729: functionState="GetByContext"
+1755: functionState="Create"
+1814: sync=false
+1820: programState="None"
+1825: progTerminationTrigger
+1836: dispatchedHttpStatus=200
+1841: sync=false
+1847: progTerminationTrigger

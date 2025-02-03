@@ -1,0 +1,17 @@
+1: sync=true
+11: functionState="None"
+21: rqsPending=true
+32: programState="None"
+46: functionState="Synchronize"
+71: functionState="Handle"
+136: lastSync=1737550951191
+148: programState="Validation"
+160: functionState="GetById"
+463: dispatchedHttpStatus=200
+472: sync=false
+482: progTerminationTrigger
+521: exceptionTrigger
+533: programState="Error"
+544: dispatchedHttpStatus=500
+555: sync=false
+568: progTerminationTrigger

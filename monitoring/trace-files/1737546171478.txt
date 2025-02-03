@@ -1,0 +1,52 @@
+1: sync=true
+8: functionState="None"
+14: rqsPending=true
+22: programState="None"
+29: functionState="Synchronize"
+79: functionState="Handle"
+188: lastSync=1737543998332
+195: programState="Validation"
+202: functionState="GetById"
+289: programState="Authentication"
+297: functionState="GetAndSynchronizeRequirements"
+304: functionState="GetCredentialsByType"
+344: functionState="GetById"
+388: functionState="GetSession"
+396: programState="Requesting"
+411: request=true
+1080: requestResponseLength=1151
+1088: request=false
+1126: functionState="GetByFilter"
+1136: functionState="GetAll"
+1151: request=true
+1825: requestResponseLength=4300
+1832: request=false
+1862: functionState="Get"
+1879: request=true
+1886: request=true
+1949: request=true
+2433: requestResponseLength=756
+2445: request=false
+2452: requestResponseLength=844
+2465: request=false
+3240: requestResponseLength=756
+3247: request=false
+3265: rqsPending=false
+3272: programState="Version Resolving"
+3281: functionState="GetByIdAndVersion"
+3291: rqDbRead
+3367: functionState="Load"
+3375: programState="Requirements Parsing"
+3469: programState="Database Storage"
+3475: functionState="Create"
+3482: rqDbWrite
+3556: rqDbRead
+3628: versionedItemUpdate={version=9, sameIdVersions=List(9)}
+3708: functionState="GetByContext"
+3742: functionState="Create"
+3813: sync=false
+3817: programState="None"
+3823: progTerminationTrigger
+3829: dispatchedHttpStatus=200
+3834: sync=false
+3839: progTerminationTrigger
