@@ -29,21 +29,14 @@ in lastSync: Events[Int] # RQ 10
 in requestResponseLength: Events[Int] # RQ 12
 in receivedHttpStatus: Events[Int]
 
-def allConditionChanges = merge4(
-  onChange(auth), onChange(sync), onChange(connector), merge4(
-    onChange(request), onChange(rqsPending), onChange(rqDbRead), merge4(
-      onChange(rqDbWrite), onChange(functionState), onChange(programState), merge4(
-        onChange(versionedItemUpdate), onChange(dispatchedHttpStatus), onChange(itemStateTransitions), merge3(
-          onChange(domainVariantUpdate), onChange(lastSync), onChange(requestResponseLength)
-        )
-      )
-    )
-  )
+def allConditionChanges = merge8(
+  onChange(auth), onChange(sync), onChange(connector), onChange(request), onChange(rqDbWrite), onChange(functionState), onChange(programState), 
+  merge6(onChange(versionedItemUpdate), onChange(dispatchedHttpStatus), onChange(itemStateTransitions), onChange(domainVariantUpdate), onChange(lastSync), onChange(requestResponseLength))
 )
 
 # Inferable Triggers
 # Produce a clock stream for recurrent checks
-def periodicalCheck = period(5)
+def periodicalCheck = period(5000)
 
 # RQ 1
 def rqRetrievalTrigger = falling(rqsPending)
@@ -83,7 +76,7 @@ in exceptionTrigger: Events[Unit]
 in progTerminationTrigger: Events[Unit]
 in requestFailTrigger: Events[Unit]
 
-def allNonIdleTriggers = merge4(stateTransitionTrigger, requestResponseFailTrigger, versionedItemUpdateTrigger, merge4(syncTrigger, specExecUpdateTrigger, voUpdateTrigger, requestResponseEmptyTrigger))
+def allNonIdleTriggers = merge7(stateTransitionTrigger, requestResponseFailTrigger, versionedItemUpdateTrigger, syncTrigger, specExecUpdateTrigger, voUpdateTrigger, requestResponseEmptyTrigger)
 def allTriggers = merge3(programIdleTrigger, requestIdleTrigger, allNonIdleTriggers)
 
 # Qualifies a trigger by propagating it only when its pre-condition is fulfilled
@@ -122,7 +115,7 @@ def isRequirementDecided(
     waitingPeriod: Int # In Seconds
 ): Events[Bool] = {
   def hasSubsequentTrigger = 
-    resetCount(allTriggers, qualifiedTrigger) > 1
+    resetCount(allTriggers, qualifiedTrigger) >= 1
     # Assuming the global system clock measures milliseconds
   def isExpired = 
     time(allTriggers) - time(qualifiedTrigger) > waitingPeriod * 1000
