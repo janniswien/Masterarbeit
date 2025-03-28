@@ -91,22 +91,25 @@ def qualifiedTrigger(
 def isRequirementFulfilled(
     trigger: Events[Unit], 
     postCondition: Events[Bool],
-    waitingPeriod: Int # In Seconds
+    isDecided: Events[Bool]
 ): Events[Bool] = {
   def actualPostCondition = default(postCondition, false)
-  # Assuming the global system clock measures milliseconds
-  def occurredInTime = 
-    time(rising(actualPostCondition)) <= time(trigger) + waitingPeriod * 1000
-  def postAfterTrigger = unitIf(
+  def onDecision = unitIf(defined(rising(isDecided)))
+  def onSatisfaction = rising(actualPostCondition)
+  def wasDecidedInThePast = default(defined(onDecision) && defined(onSatisfaction) && time(onDecision) >= time(onSatisfaction), false)
+  def risingPostAfterTrigger = unitIf(
     defined(rising(actualPostCondition)) && defined(trigger)
   )
-  def postFulfilled = lift(
-    occurredInTime && actualPostCondition, 
-    defined(trigger) && actualPostCondition, 
-    (inTime, atAll) => if isSome(inTime) then inTime else atAll
+  def fallingPostAfterTrigger = unitIf(
+    defined(falling(actualPostCondition)) && defined(trigger)
   )
   
-  on(merge(trigger, postAfterTrigger), postFulfilled)
+  def isPostFulfilled = default(
+    actualPostCondition && (!defined(onDecision) || !isDecided || wasDecidedInThePast), 
+    false
+  )
+  
+  on(merge3(trigger, risingPostAfterTrigger, fallingPostAfterTrigger), isPostFulfilled)
 }
 
 # Checks if a requirement (identified by its qualified trigger) is finally decided
@@ -131,7 +134,7 @@ def fourValueTruthEvaluation(
   waitingPeriod: Int # In Seconds
 ): Events[Int] = {
   def decided = default(isRequirementDecided(trigger, waitingPeriod), false)
-  def fulfilled = default(isRequirementFulfilled(trigger, post, waitingPeriod), true)
+  def fulfilled = default(isRequirementFulfilled(trigger, post, decided), false)
   
   default(lift4(
     constIf(-2, decided && !fulfilled), 
