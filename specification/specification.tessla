@@ -134,7 +134,7 @@ def fourValueTruthEvaluation(
   waitingPeriod: Int # In Seconds
 ): Events[Int] = {
   def decided = default(isRequirementDecided(trigger, waitingPeriod), false)
-  def fulfilled = default(isRequirementFulfilled(trigger, post, decided), false)
+  def fulfilled = default(isRequirementFulfilled(trigger, post, decided), true)
   
   default(lift4(
     constIf(-2, decided && !fulfilled), 
