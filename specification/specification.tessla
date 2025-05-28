@@ -109,7 +109,7 @@ def isRequirementFulfilled(
     false
   )
   
-  on(merge3(trigger, risingPostAfterTrigger, fallingPostAfterTrigger), isPostFulfilled)
+  on(merge(trigger, risingPostAfterTrigger), isPostFulfilled)
 }
 
 # Checks if a requirement (identified by its qualified trigger) is finally decided
@@ -228,10 +228,10 @@ def requirement3() = {
 
 # RQ 4
 def requirement4() = {
-  def haystack = versionedItemUpdate.sameIdVersions
-  def needle = versionedItemUpdate.version
-  def sameVersionIndex = List.find(haystack, needle)
-  def post = sameVersionIndex == -1 || List.find(List.set(haystack, sameVersionIndex, -1), needle) == -1
+   def highestExistingVersion = List.fold(
+    versionedItemUpdate.sameIdVersions, 0, (a: Int, b: Int) => max(a, b)
+   )
+   def post = highestExistingVersion <= versionedItemUpdate.version
 
   fourValueTruthEvaluation(versionedItemUpdateTrigger, post, 10)
 }
